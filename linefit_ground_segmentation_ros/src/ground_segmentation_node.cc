@@ -89,10 +89,31 @@ SegmentationNode::SegmentationNode(const rclcpp::NodeOptions &node_options)
               params_.r_min_square);
 }
 
+void convertRGBToXYZ(pcl::PointCloud<pcl::PointXYZRGB> &rgb_cloud,
+                     pcl::PointCloud<pcl::PointXYZ> &xyz_cloud) {
+  xyz_cloud.width = rgb_cloud.width;
+  xyz_cloud.height = rgb_cloud.height;
+  xyz_cloud.is_dense = rgb_cloud.is_dense; // Inherit other properties
+  xyz_cloud.points.resize(
+      rgb_cloud.points.size()); // Resize to match the number of points
+
+  // Iterate through the RGB points
+  for (size_t i = 0; i < rgb_cloud.points.size(); ++i) {
+    // Create a new XYZ point with the same XYZ coordinates
+    xyz_cloud.points[i].x = rgb_cloud.points[i].x;
+    xyz_cloud.points[i].y = rgb_cloud.points[i].y;
+    xyz_cloud.points[i].z = rgb_cloud.points[i].z;
+  }
+};
+
 void SegmentationNode::scanCallback(
     const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
+  pcl::PointCloud<pcl::PointXYZRGB> input_cloud;
   pcl::PointCloud<pcl::PointXYZ> cloud;
-  pcl::fromROSMsg(*msg, cloud);
+  pcl::fromROSMsg(*msg, input_cloud);
+
+  convertRGBToXYZ(input_cloud, cloud);
+
   pcl::PointCloud<pcl::PointXYZ> cloud_transformed;
 
   std::vector<int> labels;
@@ -107,11 +128,13 @@ void SegmentationNode::scanCallback(
       tf_stamped.transform.translation.x = 0;
       tf_stamped.transform.translation.y = 0;
       tf_stamped.transform.translation.z = 0;
-      Eigen::Affine3d tf;
-      tf.translate(Eigen::Vector3d(0, 0, 0));
-      tf.rotate(Eigen::Quaterniond(
+
+      Eigen::Quaterniond rotation(
           tf_stamped.transform.rotation.w, tf_stamped.transform.rotation.x,
-          tf_stamped.transform.rotation.y, tf_stamped.transform.rotation.z));
+          tf_stamped.transform.rotation.y, tf_stamped.transform.rotation.z);
+
+      Eigen::Affine3d tf(rotation);
+
       // tf::transformMsgToEigen(tf_stamped.transform, tf);
       pcl::transformPointCloud(cloud, cloud_transformed, tf);
       is_original_pc = false;
@@ -141,6 +164,12 @@ void SegmentationNode::scanCallback(
   pcl::toROSMsg(obstacle_cloud, *obstacle_msg);
   ground_msg->header = msg->header;
   obstacle_msg->header = msg->header;
+
+  // if (!gravity_aligned_frame_.empty()) {
+  //   ground_msg->header.frame_id = gravity_aligned_frame_;
+  //   obstacle_msg->header.frame_id = gravity_aligned_frame_;
+  // }
+
   ground_pub_->publish(*ground_msg);
   obstacle_pub_->publish(*obstacle_msg);
 }
